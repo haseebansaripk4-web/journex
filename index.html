@@ -789,6 +789,11 @@ body{
         <div class="section-head"><div><div class="eyebrow">By Asset</div><div class="section-title">Win Rate by Coin</div></div></div>
         <div class="chart-card" id="coinWinRateWrap"></div>
       </div>
+
+      <div class="section">
+        <div class="section-head"><div><div class="eyebrow">Discipline</div><div class="section-title">Most Common Mistakes</div></div></div>
+        <div class="chart-card" id="mistakeWrap"></div>
+      </div>
     </section>
 
   </div>
@@ -859,6 +864,12 @@ body{
         </div>
 
         <div class="field">
+          <div class="field-label"><span>RRR (Risk : Reward)</span></div>
+          <input class="input mono" type="number" step="0.01" min="0" id="fRrr" placeholder="e.g. 2 (means 1:2)">
+          <div class="helper-text">Optional. Is trade ka RRR manually likhein, analytics isi ke hisaab se average RRR dikhayegi.</div>
+        </div>
+
+        <div class="field">
           <div class="field-label">Strategy</div>
           <div class="strategy-select-row">
             <select class="select" id="fStrategy"></select>
@@ -893,8 +904,13 @@ body{
         </div>
 
         <div class="field">
-          <div class="field-label">Screenshot Link</div>
-          <input class="input" id="fScreenshot" placeholder="https://... (chart screenshot URL)">
+          <div class="field-label">Entry Module Screenshot Link</div>
+          <input class="input" id="fScreenshot" placeholder="https://... (entry module chart URL)">
+        </div>
+
+        <div class="field">
+          <div class="field-label">HTF Screenshot Link</div>
+          <input class="input" id="fScreenshotHTF" placeholder="https://... (higher timeframe chart URL)">
         </div>
 
         <div class="field">
@@ -1244,6 +1260,8 @@ function seedDemo(){
         dailyBias: Math.random()<0.5?'Up':'Down',
         emotions: emos,
         screenshot: Math.random()<0.7 ? ('https://picsum.photos/seed/ledger'+i+'/800/500') : '',
+        screenshotHTF: Math.random()<0.5 ? ('https://picsum.photos/seed/htf'+i+'/800/500') : '',
+        rrr: Math.round((1+Math.random()*2.5)*100)/100,
         mistake: win ? (Math.random()<0.15?mistakes[Math.floor(Math.random()*mistakes.length)]:'') : mistakes[Math.floor(Math.random()*mistakes.length)],
         note: notes[Math.floor(Math.random()*notes.length)],
         createdAt: dt.getTime()
@@ -1312,7 +1330,9 @@ function computeStats(trades){
   const grossProfit = wins.reduce((s,t)=>s+t.pnl,0);
   const grossLoss = losses.reduce((s,t)=>s+t.pnl,0);
   const expectancy = n? totalPnl/n : 0;
-  const avgRRR = avgLoss!==0 ? Math.abs(avgWin/avgLoss) : 0;
+  const rrrVals = trades.map(t=>t.rrr).filter(v=> typeof v==='number' && isFinite(v) && v>0);
+  const rrrCount = rrrVals.length;
+  const avgRRR = rrrCount ? rrrVals.reduce((a,b)=>a+b,0)/rrrCount : (avgLoss!==0 ? Math.abs(avgWin/avgLoss) : 0);
   const profitFactor = grossLoss!==0 ? Math.abs(grossProfit/grossLoss) : (grossProfit>0?Infinity:0);
   const dayMap = {};
   trades.forEach(t=>{ const k=dayKey(t.datetime); dayMap[k]=(dayMap[k]||0)+t.pnl; });
@@ -1320,7 +1340,7 @@ function computeStats(trades){
   const lossDays = Object.values(dayMap).filter(v=>v<0).length;
   return {
     n, wins:wins.length, losses:losses.length, totalPnl, winRate, avgWin, avgLoss, best, worst,
-    curStreak, curType, longestWin, grossProfit, grossLoss, expectancy, avgRRR, profitFactor, winDays, lossDays, dayMap
+    curStreak, curType, longestWin, grossProfit, grossLoss, expectancy, avgRRR, rrrCount, profitFactor, winDays, lossDays, dayMap
   };
 }
 
@@ -1867,7 +1887,7 @@ function renderAnalytics(){
   const mg = document.getElementById('metricGrid');
   const metrics = [
     {label:'Expectancy / Trade', value:fmtMoney(stats.expectancy)},
-    {label:'Average RRR', value: stats.avgRRR? fmtNum(stats.avgRRR,2)+'R' : '—'},
+    {label:'Average RRR'+(stats.rrrCount? ' ('+stats.rrrCount+')' : ''), value: stats.avgRRR? fmtNum(stats.avgRRR,2)+'R' : '—'},
     {label:'Gross Profit', value:'+'+fmtMoney(stats.grossProfit,false)},
     {label:'Gross Loss', value:fmtMoney(stats.grossLoss,false)},
     {label:'Profit Factor', value: isFinite(stats.profitFactor)? fmtNum(stats.profitFactor,2) : '∞'},
@@ -1889,6 +1909,7 @@ function renderAnalytics(){
   renderCalendar();
   renderStrategyCompare();
   renderCoinWinRate();
+  renderMistakes();
 }
 
 function renderAnalyticsEquity(){
@@ -1999,6 +2020,34 @@ function renderCoinWinRate(){
   }).join('');
 }
 
+function renderMistakes(){
+  const wrap = document.getElementById('mistakeWrap');
+  if(!wrap) return;
+  const map = {};
+  state.trades.forEach(t=>{
+    const raw = (t.mistake||'').trim();
+    if(!raw) return;
+    const key = raw.toLowerCase();
+    if(!map[key]) map[key] = {name:raw, count:0, pnl:0};
+    map[key].count++; map[key].pnl += (t.pnl||0);
+  });
+  const rows = Object.values(map).sort((a,b)=> b.count-a.count || a.pnl-b.pnl).slice(0,6);
+  if(!rows.length){ wrap.innerHTML = emptyState('flag','No mistakes logged','Trades mein mistake likhein, yahan most common mistake dikhegi.'); return; }
+  const top = rows[0];
+  const maxC = top.count;
+  wrap.innerHTML =
+    '<div class="detail-mistake" style="margin-bottom:14px;">'+
+      '<div style="font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; opacity:.75; margin-bottom:4px;">Most common mistake</div>'+
+      '<div style="font-weight:700; font-size:15px;">'+escapeHtml(top.name)+'</div>'+
+      '<div style="font-size:12px; margin-top:3px; opacity:.85;">'+top.count+' trade'+(top.count>1?'s':'')+' &middot; net '+fmtMoney(top.pnl)+'</div>'+
+    '</div>'+
+    rows.map(r=>{
+      const pct = r.count/maxC*100;
+      return '<div class="hbar-row"><div class="hbar-top"><span class="hbar-name">'+escapeHtml(r.name)+'</span><span class="hbar-val" style="color:var(--red)">'+r.count+'&times;</span></div>'+
+        '<div class="hbar-track"><div class="hbar-fill" style="width:'+pct+'%; background:var(--red);"></div></div></div>';
+    }).join('');
+}
+
 /* ======================= MODALS: generic ======================= */
 function openModal(id){ document.getElementById(id).classList.add('open'); }
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
@@ -2097,6 +2146,8 @@ function openTradeForm(id){
   document.getElementById('fDatetime').value = t? t.datetime : nowLocalISO();
   document.getElementById('fPnl').value = t? t.pnl : '';
   document.getElementById('fScreenshot').value = t? (t.screenshot||'') : '';
+  document.getElementById('fScreenshotHTF').value = t? (t.screenshotHTF||'') : '';
+  document.getElementById('fRrr').value = (t && typeof t.rrr==='number') ? t.rrr : '';
   document.getElementById('fMistake').value = t? (t.mistake||'') : '';
   document.getElementById('fNote').value = t? (t.note||'') : '';
   state.formDirection = t? t.direction : 'Long';
@@ -2127,17 +2178,24 @@ document.getElementById('btnSaveTrade').addEventListener('click', ()=>{
   if(!state.strategies.length){ toast('Add a strategy first','error'); return; }
   const strategyId = document.getElementById('fStrategy').value;
   const screenshot = document.getElementById('fScreenshot').value.trim();
+  const screenshotHTF = document.getElementById('fScreenshotHTF').value.trim();
+  const rrrRaw = document.getElementById('fRrr').value.trim();
+  let rrr = null;
+  if(rrrRaw !== ''){
+    rrr = parseFloat(rrrRaw);
+    if(isNaN(rrr) || rrr < 0){ toast('Please enter a valid RRR','error'); return; }
+  }
   const mistake = document.getElementById('fMistake').value.trim();
   const note = document.getElementById('fNote').value.trim();
 
   if(state.editingTradeId){
     const t = state.trades.find(x=>x.id===state.editingTradeId);
-    Object.assign(t, {coin, datetime, pnl, direction:state.formDirection, strategyId, weeklyBias:state.formWeekly, dailyBias:state.formDaily, emotions:[...state.formEmotions], screenshot, mistake, note});
+    Object.assign(t, {coin, datetime, pnl, direction:state.formDirection, strategyId, weeklyBias:state.formWeekly, dailyBias:state.formDaily, emotions:[...state.formEmotions], screenshot, screenshotHTF, rrr, mistake, note});
   } else {
     state.trades.push({
       id: uid(), coin, datetime, pnl, direction:state.formDirection, strategyId,
       weeklyBias:state.formWeekly, dailyBias:state.formDaily, emotions:[...state.formEmotions],
-      screenshot, mistake, note, createdAt: Date.now()
+      screenshot, screenshotHTF, rrr, mistake, note, createdAt: Date.now()
     });
   }
   save();
@@ -2170,15 +2228,22 @@ function openTradeDetails(id){
       '<div class="detail-item"><div class="detail-item-label">Weekly Bias</div><div class="detail-item-value">'+t.weeklyBias+'</div></div>'+
       '<div class="detail-item"><div class="detail-item-label">Daily Bias</div><div class="detail-item-value">'+t.dailyBias+'</div></div>'+
       '<div class="detail-item"><div class="detail-item-label">Direction</div><div class="detail-item-value">'+t.direction+'</div></div>'+
+      ((typeof t.rrr==='number' && t.rrr>0)? '<div class="detail-item"><div class="detail-item-label">RRR</div><div class="detail-item-value">1 : '+fmtNum(t.rrr,2)+'</div></div>' : '')+
     '</div>'+
     (t.emotions && t.emotions.length? '<div class="detail-block"><div class="detail-block-title">'+icon('smile','icon-sm')+' Emotions</div><div class="emotion-grid">'+t.emotions.map(e=>'<span class="chip active">'+e+'</span>').join('')+'</div></div>' : '')+
-    (t.screenshot? '<div class="detail-block"><div class="detail-block-title">'+icon('image','icon-sm')+' Screenshot</div><div class="detail-image-wrap" id="detailImgWrap"><img src="'+escapeAttr(t.screenshot)+'" alt="Trade screenshot" onerror="this.parentElement.style.display=\'none\'"><div class="zoom-hint">'+icon('zoom','icon-sm')+'</div></div></div>' : '')+
+    (t.screenshot? detailImageBlock('Entry Module', t.screenshot, 'detailImgWrap') : '')+
+    (t.screenshotHTF? detailImageBlock('HTF', t.screenshotHTF, 'detailImgWrapHTF') : '')+
     (t.mistake? '<div class="detail-block"><div class="detail-block-title">'+icon('flag','icon-sm')+' Mistake</div><div class="detail-mistake">'+escapeHtml(t.mistake)+'</div></div>' : '')+
     (t.note? '<div class="detail-block"><div class="detail-block-title">'+icon('fileText','icon-sm')+' Note</div><div class="detail-note">'+escapeHtml(t.note)+'</div></div>' : '');
 
   const imgWrap = document.getElementById('detailImgWrap');
   if(imgWrap) imgWrap.addEventListener('click', ()=>openLightbox(t.screenshot));
+  const imgWrapHTF = document.getElementById('detailImgWrapHTF');
+  if(imgWrapHTF) imgWrapHTF.addEventListener('click', ()=>openLightbox(t.screenshotHTF));
   openModal('modalDetails');
+}
+function detailImageBlock(label, src, wrapId){
+  return '<div class="detail-block"><div class="detail-block-title">'+icon('image','icon-sm')+' '+label+' Screenshot</div><div class="detail-image-wrap" id="'+wrapId+'"><img src="'+escapeAttr(src)+'" alt="'+label+' screenshot" onerror="this.closest(\'.detail-block\').style.display=\'none\'"><div class="zoom-hint">'+icon('zoom','icon-sm')+'</div></div></div>';
 }
 function escapeAttr(s){ return s.replace(/"/g,'&quot;'); }
 
